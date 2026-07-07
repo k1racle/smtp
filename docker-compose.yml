@@ -65,8 +65,10 @@ services:
     volumes:
       - mailu-certs:/certs
     depends_on:
-      - cert-init
-      - resolver
+      cert-init:
+        condition: service_completed_successfully
+      resolver:
+        condition: service_started
     networks:
       - mailu
       - webmail
