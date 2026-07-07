@@ -1,0 +1,43 @@
+services:
+  stalwart:
+    image: ${STALWART_IMAGE:-stalwartlabs/stalwart:v0.16}
+    container_name: ${STALWART_CONTAINER_NAME:-stalwart-mail}
+    hostname: ${STALWART_HOSTNAME:-mail.example.com}
+    restart: unless-stopped
+
+    ports:
+      # Почтовые порты (доступны по IP сервера)
+      - "25:25"       # SMTP (входящая почта)
+      - "465:465"     # SMTPS
+      - "587:587"     # SMTP submission (STARTTLS)
+      - "143:143"     # IMAP
+      - "993:993"     # IMAPS
+      - "110:110"     # POP3
+      - "995:995"     # POP3S
+      - "4190:4190"   # ManageSieve
+      # Веб-интерфейс админки (только с localhost, проксируется через ваш Nginx)
+      - "${ADMIN_BIND_IP:-127.0.0.1}:8080:8080"
+
+    environment:
+      # Фиксированный recovery-админ, чтобы не выуживать пароль из логов.
+      # Формат: имя:пароль. Смените пароль!
+      - STALWART_RECOVERY_ADMIN=${STALWART_RECOVERY_ADMIN:-admin:ChangeMeStrongPassword123}
+      # Публичный URL, который Stalwart публикует в JMAP/OAuth и использует
+      # для редиректов. Если Nginx раздает HTTPS по IP, укажите https://<IP>/
+      - STALWART_PUBLIC_URL=${STALWART_PUBLIC_URL:-http://127.0.0.1:8080/}
+      - TZ=${TZ:-UTC}
+
+    volumes:
+      - stalwart-etc:/etc/stalwart
+      - stalwart-data:/var/lib/stalwart
+
+    networks:
+      - mail
+
+volumes:
+  stalwart-etc:
+  stalwart-data:
+
+networks:
+  mail:
+    driver: bridge
