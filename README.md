@@ -40,12 +40,14 @@
    STALWART_RECOVERY_ADMIN=admin:MySuperSecretPass
    STALWART_PUBLIC_URL=https://203.0.113.10/
    ADMIN_BIND_IP=127.0.0.1
+   ADMIN_PORT=18080
    TZ=Europe/Moscow
    ```
 
    - `STALWART_HOSTNAME` — домен, который резолвится на IP сервера. Используется в SMTP-приветствии и для TLS/ACME.
    - `STALWART_PUBLIC_URL` — публичный URL для JMAP/OAuth/редиректов. Если Nginx раздает HTTPS по IP — укажите `https://<SERVER_IP>/`.
    - `ADMIN_BIND_IP=127.0.0.1` означает, что веб-админка доступна только локально и проксируется через Nginx. Если Nginx на другом хосте — поменяйте на `0.0.0.0` или конкретный IP.
+   - `ADMIN_PORT=18080` — внешний порт веб-админки. Если на сервере уже занят 8080, используйте 18080 или любой другой свободный порт.
 
 ## Деплой в Portainer
 
@@ -65,7 +67,7 @@
 1. Сгенерируйте сертификат:
 
    ```bash
-   sudo SERVER_IP=203.0.113.10 bash nginx/generate-ssl.sh
+   sudo SERVER_IP=203.0.113.10 ADMIN_PORT=18080 bash nginx/generate-ssl.sh
    ```
 
 2. Скопируйте конфиг:
@@ -77,7 +79,7 @@
    sudo systemctl reload nginx
    ```
 
-   Если Nginx находится на другом хосте, в `proxy_pass` укажите IP/порт сервера Stalwart и откройте `8080` для этого IP.
+   Если Nginx находится на другом хосте, в `proxy_pass` укажите IP/порт сервера Stalwart и откройте соответствующий `ADMIN_PORT` для этого IP.
 
 ## Первый запуск и настройка Stalwart
 
