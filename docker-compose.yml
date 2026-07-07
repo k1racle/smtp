@@ -1,44 +1,162 @@
 services:
-  stalwart:
-    image: ${STALWART_IMAGE:-stalwartlabs/stalwart:v0.16}
-    container_name: ${STALWART_CONTAINER_NAME:-stalwart-mail}
-    hostname: ${STALWART_HOSTNAME:-mail.example.com}
-    restart: unless-stopped
-
-    ports:
-      # Почтовые порты (доступны по IP сервера)
-      - "25:25"       # SMTP (входящая почта)
-      - "465:465"     # SMTPS
-      - "587:587"     # SMTP submission (STARTTLS)
-      - "143:143"     # IMAP
-      - "993:993"     # IMAPS
-      - "110:110"     # POP3
-      - "995:995"     # POP3S
-      - "4190:4190"   # ManageSieve
-      # Веб-интерфейс админки (только с localhost, проксируется через ваш Nginx).
-      # По умолчанию 18080, чтобы не конфликтовать с другими сервисами на 8080.
-      - "${ADMIN_BIND_IP:-127.0.0.1}:${ADMIN_PORT:-18080}:8080"
-
-    environment:
-      # Фиксированный recovery-админ, чтобы не выуживать пароль из логов.
-      # Формат: имя:пароль. Смените пароль!
-      - STALWART_RECOVERY_ADMIN=${STALWART_RECOVERY_ADMIN:-admin:ChangeMeStrongPassword123}
-      # Публичный URL, который Stalwart публикует в JMAP/OAuth и использует
-      # для редиректов. Если Nginx раздает HTTPS по IP, укажите https://<IP>/
-      - STALWART_PUBLIC_URL=${STALWART_PUBLIC_URL:-http://127.0.0.1:8080/}
-      - TZ=${TZ:-UTC}
-
+  # One-off сервис для генерации самоподписанного сертификата (для почтовых портов).
+  # При повторном запуске проверяет наличие сертификата и не перезаписывает его.
+  cert-init:
+    image: alpine:latest
+    restart: "no"
     volumes:
-      - stalwart-etc:/etc/stalwart
-      - stalwart-data:/var/lib/stalwart
+      - mailu-certs:/certs
+    environment:
+      - HOSTNAMES=${HOSTNAMES:-mail.example.com}
+    command: >
+      sh -c '
+        apk add --no-cache openssl >/dev/null 2>&1 &&
+        if [ ! -f /certs/cert.pem ] || [ ! -f /certs/key.pem ]; then
+          FIRST_HOST=$$(echo "$$HOSTNAMES" | cut -d"," -f1);
+          echo "Generating self-signed certificate for $$FIRST_HOST";
+          openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout /certs/key.pem \
+            -out /certs/cert.pem \
+            -subj "/CN=$$FIRST_HOST" \
+            -addext "subjectAltName=DNS:$$FIRST_HOST";
+          chmod 644 /certs/cert.pem;
+          chmod 600 /certs/key.pem;
+        else
+          echo "Certificate already exists, skipping generation";
+        fi
+      '
 
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    volumes:
+      - mailu-redis:/data
+    depends_on:
+      - resolver
+    dns:
+      - 192.168.203.254
     networks:
-      - mail
+      - mailu
 
-volumes:
-  stalwart-etc:
-  stalwart-data:
+  resolver:
+    image: ghcr.io/mailu/unbound:${MAILU_VERSION:-2024.06}
+    env_file: mailu.env
+    restart: unless-stopped
+    networks:
+      mailu:
+        ipv4_address: 192.168.203.254
+
+  front:
+    image: ghcr.io/mailu/nginx:${MAILU_VERSION:-2024.06}
+    env_file: mailu.env
+    restart: unless-stopped
+    ports:
+      # Почтовые порты
+      - "25:25"
+      - "110:110"
+      - "143:143"
+      - "465:465"
+      - "587:587"
+      - "993:993"
+      - "995:995"
+      - "4190:4190"
+      # Веб-интерфейс (админка + webmail) — проксируется через ваш Nginx Proxy Manager
+      - "${MAILU_WEB_BIND:-0.0.0.0}:${MAILU_WEB_PORT:-8880}:80"
+    volumes:
+      - mailu-certs:/certs
+    depends_on:
+      - cert-init
+      - resolver
+    networks:
+      - mailu
+      - webmail
+    dns:
+      - 192.168.203.254
+
+  admin:
+    image: ghcr.io/mailu/admin:${MAILU_VERSION:-2024.06}
+    env_file: mailu.env
+    restart: unless-stopped
+    volumes:
+      - mailu-data:/data
+      - mailu-dkim:/dkim
+    depends_on:
+      - redis
+      - resolver
+    networks:
+      - mailu
+    dns:
+      - 192.168.203.254
+
+  imap:
+    image: ghcr.io/mailu/dovecot:${MAILU_VERSION:-2024.06}
+    env_file: mailu.env
+    restart: unless-stopped
+    volumes:
+      - mailu-mail:/mail
+    depends_on:
+      - front
+      - resolver
+    networks:
+      - mailu
+    dns:
+      - 192.168.203.254
+
+  smtp:
+    image: ghcr.io/mailu/postfix:${MAILU_VERSION:-2024.06}
+    env_file: mailu.env
+    restart: unless-stopped
+    volumes:
+      - mailu-mailqueue:/queue
+    depends_on:
+      - front
+      - resolver
+    networks:
+      - mailu
+    dns:
+      - 192.168.203.254
+
+  antispam:
+    image: ghcr.io/mailu/rspamd:${MAILU_VERSION:-2024.06}
+    env_file: mailu.env
+    restart: unless-stopped
+    volumes:
+      - mailu-filter:/var/lib/rspamd
+    depends_on:
+      - front
+      - redis
+      - resolver
+    networks:
+      - mailu
+    dns:
+      - 192.168.203.254
+
+  webmail:
+    image: ghcr.io/mailu/webmail:${MAILU_VERSION:-2024.06}
+    env_file: mailu.env
+    restart: unless-stopped
+    volumes:
+      - mailu-webmail:/data
+    networks:
+      - webmail
+    depends_on:
+      - front
 
 networks:
-  mail:
+  mailu:
     driver: bridge
+    ipam:
+      config:
+        - subnet: ${SUBNET:-192.168.203.0/24}
+  webmail:
+    driver: bridge
+
+volumes:
+  mailu-certs:
+  mailu-redis:
+  mailu-data:
+  mailu-dkim:
+  mailu-mail:
+  mailu-mailqueue:
+  mailu-filter:
+  mailu-webmail:

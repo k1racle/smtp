@@ -1,147 +1,111 @@
-# Stalwart Mail Server — деплой через Portainer
+# Mailu Mail Server — деплой через Portainer
 
-Готовый репозиторий для развертывания почтового сервера [Stalwart](https://stalw.art/) через Docker Compose / Portainer Stack.
+Готовый репозиторий для развертывания почтового сервера [Mailu](https://mailu.io/) через Docker Compose / Portainer Stack.
 
 ## Что внутри
 
-- `docker-compose.yml` — стек Stalwart Mail Server.
-- `.env.example` — пример переменных окружения.
-- `nginx/` — пример конфигурации **вашего отдельного Nginx** + скрипт генерации самоподписанного сертификата.
+- `docker-compose.yml` — стек Mailu (front, admin, postfix, dovecot, rspamd, roundcube webmail).
+- `mailu.env` — основная конфигурация (домены, пароль админа, TLS).
+- `nginx/npm-proxy-notes.md` — как настроить ваш Nginx Proxy Manager.
 
 ## Особенности
 
 - Почтовые службы (SMTP/IMAP/POP3/Sieve) слушают на IP сервера напрямую.
-- Веб-админка доступна через ваш Nginx по HTTPS на IP сервера (самоподписанный сертификат).
-- Внутри веб-админки вы создаете **любое количество доменов** и почтовых ящиков.
-- Nginx не входит в стек — он у вас уже есть отдельно.
-
-## Требования
-
-- Сервер с Linux + Docker + Portainer.
-- Публичный статический IP.
-- Для нормальной доставки почты желательно:
-  - настроить PTR/rDNS на тот hostname, который вы укажете в `STALWART_HOSTNAME`;
-  - открыть порты 25, 465/587, 993 (143, 110, 995, 4190 — по желанию);
-  - в DNS каждого домена прописать MX, SPF, DKIM, DMARC (Stalwart выдаст готовую зону).
+- Веб-админка и Roundcube webmail доступны через ваш Nginx Proxy Manager.
+- Админка Mailu поддерживает **русский язык**.
+- Внутри админки создаёте домены и почтовые ящики.
 
 ## Подготовка
 
-1. Скопируйте `.env.example` в `.env` (или задайте переменные прямо в Portainer при создании Stack):
-
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Отредактируйте `.env`:
+1. В Portainer удалите старый стек Stalwart и его volumes.
+2. Отредактируйте `mailu.env` в этом репозитории (или задайте переменные в Portainer):
 
    ```env
-   SERVER_IP=203.0.113.10
-   STALWART_HOSTNAME=mail.example.com
-   STALWART_RECOVERY_ADMIN=admin:MySuperSecretPass
-   STALWART_PUBLIC_URL=https://203.0.113.10/
-   ADMIN_BIND_IP=127.0.0.1
-   ADMIN_PORT=18080
-   TZ=Europe/Moscow
+   DOMAIN=winemaking-today.ru
+   HOSTNAMES=mail.winemaking-today.ru
+   INITIAL_ADMIN_PW=ВашСложныйПароль
+   SECRET_KEY=...        # openssl rand -hex 16
    ```
 
-   - `STALWART_HOSTNAME` — домен, который резолвится на IP сервера. Используется в SMTP-приветствии и для TLS/ACME.
-   - `STALWART_PUBLIC_URL` — публичный URL для JMAP/OAuth/редиректов. Если Nginx раздает HTTPS по IP — укажите `https://<SERVER_IP>/`.
-   - `ADMIN_BIND_IP=127.0.0.1` означает, что веб-админка доступна только локально и проксируется через Nginx. Если Nginx на другом хосте — поменяйте на `0.0.0.0` или конкретный IP.
-   - `ADMIN_PORT=18080` — внешний порт веб-админки. Если на сервере уже занят 8080, используйте 18080 или любой другой свободный порт.
+3. Убедитесь, что DNS-запись `mail.winemaking-today.ru` указывает на IP сервера.
 
 ## Деплой в Portainer
 
-1. В Portainer перейдите в **Stacks** → **Add stack**.
-2. Выберите **Repository**.
-3. Укажите URL этого репозитория.
-4. Compose path: `docker-compose.yml`.
-5. В разделе **Environment variables** вставьте содержимое `.env` (или задайте переменные вручную).
-6. Нажмите **Deploy the stack**.
+1. **Stacks → Add stack → Repository**.
+2. URL репозитория: `https://github.com/k1racle/smtp.git`.
+3. Compose path: `docker-compose.yml`.
+4. В разделе **Environment variables** можно вставить содержимое `mailu.env` (или оставить как есть — compose подхватит файл из репо).
+5. **Deploy the stack**.
 
-После запуска контейнер будет в bootstrap-режиме: откроется порт 8080 и будет доступен wizard первоначальной настройки.
+При первом запуске сервис `cert-init` сгенерирует самоподписанный сертификат для почтовых портов.
 
-## Настройка Nginx
+## Настройка Nginx Proxy Manager
 
-На вашем отдельном сервере с Nginx:
+См. `nginx/npm-proxy-notes.md`.
 
-1. Сгенерируйте сертификат:
+Кратко:
 
-   ```bash
-   sudo SERVER_IP=203.0.113.10 ADMIN_PORT=18080 bash nginx/generate-ssl.sh
-   ```
+- Domain Names: `185.72.147.187` (или `mail.winemaking-today.ru`).
+- Forward Hostname / IP: `185.72.147.187`.
+- Forward Port: `8880`.
+- Scheme: `http`.
 
-2. Скопируйте конфиг:
+Если используете домен — запросите Let's Encrypt в NPM. Если голый IP — оставьте HTTP.
 
-   ```bash
-   sudo cp nginx/mail-server.conf /etc/nginx/sites-available/mail-server
-   sudo ln -s /etc/nginx/sites-available/mail-server /etc/nginx/sites-enabled/mail-server
-   sudo nginx -t
-   sudo systemctl reload nginx
-   ```
+## Первый вход
 
-   Если Nginx находится на другом хосте, в `proxy_pass` укажите IP/порт сервера Stalwart и откройте соответствующий `ADMIN_PORT` для этого IP.
+```text
+https://185.72.147.187/admin
+```
 
-## Первый запуск и настройка Stalwart
+- Логин: `admin@winemaking-today.ru` (или ваш `INITIAL_ADMIN_ACCOUNT@INITIAL_ADMIN_DOMAIN`).
+- Пароль: тот, что задан в `INITIAL_ADMIN_PW`.
 
-1. Откройте в браузере:
+## Смена языка на русский
 
-   ```
-   https://<SERVER_IP>/admin
-   ```
-
-   Браузер предупредит о самоподписанном сертификате — это нормально.
-
-2. Войдите с учетными данными из `STALWART_RECOVERY_ADMIN` (по умолчанию `admin:ChangeMeStrongPassword123`).
-3. Пройдите setup wizard:
-   - **Server hostname**: `mail.example.com` (или ваш домен).
-   - **Default email domain**: ваш основной домен.
-   - **Automatically obtain TLS certificate**: отключите, если используете Nginx с самоподписанным сертификатом. Для боевой почты лучше получить валидный сертификат (через Stalwart ACME или загрузить свой).
-   - **Storage**, **Directory**, **Logging** — оставьте внутренние значения по умолчанию.
-   - **DNS management**: выберите Manual.
-4. На финальном экране wizard запишите email и пароль постоянного администратора.
-5. **Перезапустите стек** в Portainer, чтобы применилась конфигурация.
-6. Снова откройте `https://<SERVER_IP>/admin` и войдите уже постоянным администратором.
+В админке Mailu в правом верхнем углу нажмите на язык → выберите **Русский**.
 
 ## Создание доменов и ящиков
 
-В веб-админке:
+- **Управление → Домены → Создать** — добавьте все свои домены.
+- Для каждого домена откройте **Подробности** и скопируйте DNS-записи (MX, SPF, DKIM, DMARC, TLSA) в панель управления DNS.
+- **Управление → Пользователи → Создать** — добавляйте почтовые ящики.
 
-- **Management → Domains → Create** — добавьте все свои домены.
-- Для каждого домена откройте меню **View DNS Zone file** и скопируйте записи (MX, SPF, DKIM, DMARC, MTA-STS) в панель управления DNS вашего регистратора/хостера.
-- **Management → Accounts → Create** — создавайте почтовые ящики в нужных доменах.
+## Webmail
+
+Roundcube доступен по:
+
+```text
+https://185.72.147.187/webmail
+```
+
+Пользователь логинится полным email-адресом и своим паролем.
+
+## TLS-сертификат для почты
+
+По умолчанию используется самоподписанный сертификат. Почтовые клиенты будут предупреждать о нём.
+
+Для продакшена рекомендуется получить валидный сертификат для `mail.winemaking-today.ru` и положить файлы в volume `mailu-certs` как:
+
+- `cert.pem` — сертификат (или цепочка).
+- `key.pem` — приватный ключ.
+
+Или загрузите сертификат через админку Mailu: **Администрирование → Сертификаты**.
+
+## rDNS / PTR
+
+Обязательно настройте обратную DNS-запись для IP сервера на `mail.winemaking-today.ru` в панели хостинг-провайдера.
 
 ## Подключение почтовых клиентов
 
-Пример настроек для ящика `user@example.com`:
+Для ящика `user@winemaking-today.ru`:
 
-- **IMAP**: `mail.example.com`, порт 993, SSL/TLS.
-- **SMTP**: `mail.example.com`, порт 587, STARTTLS.
-- **POP3**: `mail.example.com`, порт 995, SSL/TLS (если нужен).
-
-> Важно: если используется самоподписанный сертификат, клиенты будут предупреждать о нем. Для продакшена настройте валидный сертификат.
-
-## Безопасность и продакшен
-
-- Сразу смените recovery-пароль (`STALWART_RECOVERY_ADMIN`) после первого входа.
-- Отключите HTTP-порт 8080 на внешнем интерфейсе, когда настроите HTTPS через Nginx (`ADMIN_BIND_IP=127.0.0.1`).
-- Для отправки почты в крупные почтовые сервисы настройте:
-  - PTR-запись (rDNS) для IP сервера на `STALWART_HOSTNAME`;
-  - SPF, DKIM, DMARC для каждого домена;
-  - валидный TLS-сертификат для `STALWART_HOSTNAME`.
+| Протокол | Сервер | Порт | Шифрование |
+|---|---|---|---|
+| IMAP | `mail.winemaking-today.ru` | 993 | SSL/TLS |
+| SMTP | `mail.winemaking-today.ru` | 587 | STARTTLS |
+| POP3 | `mail.winemaking-today.ru` | 995 | SSL/TLS |
 
 ## Обновление
 
-Поменяйте тег образа в `.env` (например, на новый `v0.16.x`) и нажмите **Pull and redeploy** в Portainer, либо локально:
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-Перед обновлением всегда делайте бэкап volumes `stalwart-etc` и `stalwart-data`.
-
-## Полезные ссылки
-
-- Документация Stalwart: https://stalw.art/docs/
-- Обратный прокси: https://stalw.art/docs/category/reverse-proxy/
-- DNS-записи: https://stalw.art/docs/category/dns-records/
+Поменяйте `MAILU_VERSION` в `mailu.env` на новый релиз и нажмите **Pull and redeploy** в Portainer.
