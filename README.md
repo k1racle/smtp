@@ -29,6 +29,8 @@
 
 3. Убедитесь, что DNS-запись `mail.winemaking-today.ru` указывает на IP сервера.
 
+> По умолчанию в `mailu.env` установлено `SESSION_COOKIE_SECURE=False`, чтобы вход в админку работал по HTTP через ваш Nginx Proxy Manager. Для публичного HTTPS-доступа измените на `True`.
+
 ## Деплой в Portainer
 
 1. **Stacks → Add stack → Repository**.
