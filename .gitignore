@@ -7,3 +7,6 @@
 *.p12
 data/
 logs/
+
+# Editor settings
+.vscode/
